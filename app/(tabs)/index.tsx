@@ -1,98 +1,383 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import React, { useState, useRef, useMemo } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { MOCK_MEDIA_ITEMS } from '@/constants/mock-media';
+import { StorageSummary } from '@/components/storage-summary';
+import { MediaReviewCard, MediaReviewCardRef } from '@/components/media-review-card';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { formatFileSize } from '@/utils/formatters';
+import { MockMediaItem } from '@/types/media';
+
+interface SwipeHistory {
+  item: MockMediaItem;
+  direction: 'left' | 'right';
+}
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
+  // State of remaining items to review
+  const [items, setItems] = useState<MockMediaItem[]>(MOCK_MEDIA_ITEMS);
+  // State for session history to support Undo
+  const [history, setHistory] = useState<SwipeHistory[]>([]);
+  // Tracking kept and deleted items for statistics in empty state
+  const [deletedItems, setDeletedItems] = useState<MockMediaItem[]>([]);
+  const [keptItems, setKeptItems] = useState<MockMediaItem[]>([]);
+
+  // Ref to programmatically trigger swiping on the top card via buttons
+  const cardRef = useRef<MediaReviewCardRef>(null);
+
+  // Compute total size and count dynamically based on remaining items
+  const reviewableSize = useMemo(() => {
+    return items.reduce((sum, item) => sum + item.fileSize, 0);
+  }, [items]);
+
+  const reviewableCount = items.length;
+
+  // Compute space saved from deleted items
+  const spaceSaved = useMemo(() => {
+    return deletedItems.reduce((sum, item) => sum + item.fileSize, 0);
+  }, [deletedItems]);
+
+  const handleSwipeLeft = (item: MockMediaItem) => {
+    setHistory(prev => [...prev, { item, direction: 'left' }]);
+    setDeletedItems(prev => [...prev, item]);
+    setItems(prev => prev.slice(1));
+  };
+
+  const handleSwipeRight = (item: MockMediaItem) => {
+    setHistory(prev => [...prev, { item, direction: 'right' }]);
+    setKeptItems(prev => [...prev, item]);
+    setItems(prev => prev.slice(1));
+  };
+
+  const handleUndo = () => {
+    if (history.length === 0) return;
+
+    const lastSwipe = history[history.length - 1];
+    setHistory(prev => prev.slice(0, -1));
+    setItems(prev => [lastSwipe.item, ...prev]);
+
+    if (lastSwipe.direction === 'left') {
+      setDeletedItems(prev => prev.slice(0, -1));
+    } else {
+      setKeptItems(prev => prev.slice(0, -1));
+    }
+  };
+
+  const handleReset = () => {
+    setItems(MOCK_MEDIA_ITEMS);
+    setHistory([]);
+    setDeletedItems([]);
+    setKeptItems([]);
+  };
+
+  return (
+    <GestureHandlerRootView style={styles.container}>
+      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}>
+        {/* Header Block */}
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
+            <MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" />
+            <ThemedText style={styles.headerTitle} type="title">Swipely</ThemedText>
+          </View>
+          <ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">
+            Clean up your storage
+          </ThemedText>
+        </View>
+
+        {/* Device Storage Summary Section */}
+        <StorageSummary reviewableSize={reviewableSize} reviewableCount={reviewableCount} />
+
+        {/* Card Stack / Review Workspace Area */}
+        <View style={styles.cardContainer}>
+          {items.length > 0 ? (
+            /* Render only top 2 cards for performance; reverse so the top-most card is rendered last in JSX and stays on top */
+            items.slice(0, 2).reverse().map((item, index) => {
+              const isTop = index === (items.slice(0, 2).length - 1);
+              return (
+                <MediaReviewCard
+                  key={item.id}
+                  item={item}
+                  isTop={isTop}
+                  onSwipeLeft={() => handleSwipeLeft(item)}
+                  onSwipeRight={() => handleSwipeRight(item)}
+                  ref={isTop ? cardRef : null}
+                />
+              );
+            })
+          ) : (
+            /* Elegant Empty State with Review Statistics */
+            <View style={styles.emptyContainer}>
+              <View style={[styles.emptyCard, isDark ? styles.emptyCardDark : styles.emptyCardLight]}>
+                <View style={styles.emptyIconContainer}>
+                  <MaterialIcons name="celebration" size={44} color="#34C759" />
+                </View>
+                <ThemedText style={styles.emptyTitle}>All Caught Up!</ThemedText>
+                <ThemedText style={styles.emptyDescription} lightColor="#687076" darkColor="#9BA1A6">
+                  Great job! You have finished reviewing all mock media files on your device.
+                </ThemedText>
+
+                {/* Statistics Box */}
+                <View style={styles.statsContainer}>
+                  <View style={styles.statRow}>
+                    <ThemedText style={styles.statLabel} lightColor="#687076" darkColor="#9BA1A6">
+                      Space Cleaned
+                    </ThemedText>
+                    <ThemedText style={styles.statValue} lightColor="#34C759" darkColor="#30D158">
+                      {formatFileSize(spaceSaved)}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.statRow}>
+                    <ThemedText style={styles.statLabel} lightColor="#687076" darkColor="#9BA1A6">
+                      Files Deleted
+                    </ThemedText>
+                    <ThemedText style={styles.statValue}>
+                      {deletedItems.length}
+                    </ThemedText>
+                  </View>
+                  <View style={styles.statRow}>
+                    <ThemedText style={styles.statLabel} lightColor="#687076" darkColor="#9BA1A6">
+                      Files Kept
+                    </ThemedText>
+                    <ThemedText style={styles.statValue}>
+                      {keptItems.length}
+                    </ThemedText>
+                  </View>
+                </View>
+
+                {/* Reset Review Button */}
+                <TouchableOpacity style={styles.resetButton} onPress={handleReset} activeOpacity={0.8}>
+                  <MaterialIcons name="replay" size={20} color="#FFF" />
+                  <Text style={styles.resetButtonText}>Reset and Restart</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Action Button Controls (Footer Panel) */}
+        {items.length > 0 && (
+          <View style={styles.buttonsContainer}>
+            {/* Programmatic Undo Button */}
+            <TouchableOpacity
+              onPress={handleUndo}
+              disabled={history.length === 0}
+              style={[
+                styles.roundButton,
+                isDark && styles.roundButtonDark,
+                styles.undoButton,
+                history.length === 0 && styles.disabledButton,
+              ]}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="undo" size={22} color={history.length === 0 ? (isDark ? '#48484A' : '#AEAEB2') : '#FF9500'} />
+            </TouchableOpacity>
+
+            {/* Swipe Left/Delete Trigger Button */}
+            <TouchableOpacity
+              onPress={() => cardRef.current?.swipeLeft()}
+              style={[styles.roundButton, isDark && styles.roundButtonDark, styles.deleteButton]}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="close" size={32} color="#FF3B30" />
+            </TouchableOpacity>
+
+            {/* Swipe Right/Keep Trigger Button */}
+            <TouchableOpacity
+              onPress={() => cardRef.current?.swipeRight()}
+              style={[styles.roundButton, isDark && styles.roundButtonDark, styles.keepButton]}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="check" size={32} color="#34C759" />
+            </TouchableOpacity>
+          </View>
+        )}
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  container: {
+    flex: 1,
+  },
+  screen: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 4,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  stepContainer: {
-    gap: 8,
+  headerTitle: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  cardContainer: {
+    flex: 1,
+    marginHorizontal: 16,
+    marginVertical: 12,
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  buttonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 20,
+    paddingBottom: 12,
+    paddingHorizontal: 20,
+  },
+  roundButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.15)',
+    // Shadow Styling
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  roundButtonDark: {
+    backgroundColor: '#1C1C1E',
+    borderColor: '#2C2C2E',
+  },
+  undoButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+  },
+  deleteButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderColor: 'rgba(255, 59, 48, 0.2)',
+  },
+  keepButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderColor: 'rgba(52, 199, 89, 0.2)',
+  },
+  disabledButton: {
+    opacity: 0.4,
+  },
+  emptyContainer: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 8,
+  },
+  emptyCard: {
+    width: '100%',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(128, 128, 128, 0.15)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  emptyCardLight: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000000',
+  },
+  emptyCardDark: {
+    backgroundColor: '#1C1C1E',
+    shadowColor: '#000000',
+  },
+  emptyIconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(52, 199, 89, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  emptyDescription: {
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+  statsContainer: {
+    width: '100%',
+    gap: 12,
+    marginBottom: 20,
+  },
+  statRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128, 128, 128, 0.1)',
+  },
+  statLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  statValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#0a7ea4',
+    gap: 8,
+    shadowColor: '#0a7ea4',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  resetButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
   },
 });
