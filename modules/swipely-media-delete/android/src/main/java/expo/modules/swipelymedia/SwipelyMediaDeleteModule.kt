@@ -84,37 +84,94 @@ class SwipelyMediaDeleteModule : Module() {
     }
   }
 
-  private fun findMediaUri(path: String): Uri? {
-    val targetPath = Uri.parse(path).path ?: return null
+  private fun findMediaUri(rawPath: String): Uri? {
+    val targetPath = Uri.parse(rawPath).path ?: rawPath
     val resolver = context.contentResolver
+    val fileName = targetPath.substringAfterLast('/')
+    val relativePath = relativePathFor(targetPath)
+
+    // Android 11+ exposes RELATIVE_PATH/DISPLAY_NAME for scoped-storage media.
+    // Prefer this lookup instead of relying on the legacy DATA column.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+      val imageUri = findInCollection(
+        resolver,
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+        fileName,
+        relativePath
+      )
+      if (imageUri != null) return imageUri
+
+      val videoUri = findInCollection(
+        resolver,
+        MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+        fileName,
+        relativePath
+      )
+      if (videoUri != null) return videoUri
+    }
+
+    // Legacy fallback for older Android/provider implementations.
     val collection = MediaStore.Files.getContentUri("external")
     val projection = arrayOf(
       MediaStore.Files.FileColumns._ID,
-      MediaStore.Files.FileColumns.MEDIA_TYPE,
-      MediaStore.Files.FileColumns.DATA
+      MediaStore.Files.FileColumns.MEDIA_TYPE
     )
 
-    resolver.query(
-      collection,
-      projection,
-      "${MediaStore.Files.FileColumns.DATA} = ?",
-      arrayOf(targetPath),
-      null
-    )?.use { cursor ->
-      val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-      val typeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
-
-      if (cursor.moveToFirst()) {
-        val id = cursor.getLong(idColumn)
-        val mediaType = cursor.getInt(typeColumn)
-        return when (mediaType) {
-          MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
-          MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+    return try {
+      resolver.query(
+        collection,
+        projection,
+        "${MediaStore.Files.FileColumns.DATA} = ?",
+        arrayOf(targetPath),
+        null
+      )?.use { cursor ->
+        if (!cursor.moveToFirst()) return@use null
+        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID))
+        val mediaType = cursor.getInt(cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE))
+        when (mediaType) {
+          MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE ->
+            ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+          MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO ->
+            ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
           else -> ContentUris.withAppendedId(collection, id)
         }
       }
+    } catch (_: Exception) {
+      null
     }
+  }
 
-    return null
+  private fun findInCollection(
+    resolver: android.content.ContentResolver,
+    collection: Uri,
+    fileName: String,
+    relativePath: String
+  ): Uri? {
+    val projection = arrayOf(MediaStore.MediaColumns._ID)
+
+    return try {
+      resolver.query(
+        collection,
+        projection,
+        "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
+        arrayOf(fileName, relativePath),
+        null
+      )?.use { cursor ->
+        if (!cursor.moveToFirst()) null
+        else ContentUris.withAppendedId(
+          collection,
+          cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+        )
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun relativePathFor(path: String): String {
+    val normalized = path.removePrefix("/storage/emulated/0/").removePrefix("/")
+    val slash = normalized.lastIndexOf('/')
+    if (slash < 0) return ""
+    return normalized.substring(0, slash + 1)
   }
 }
