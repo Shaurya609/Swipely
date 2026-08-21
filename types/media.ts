@@ -22,7 +22,7 @@ export interface ReviewedAssetRef {
 
 export interface TrashedAsset extends MockMediaItem {
   deletedAt: string; // ISO timestamp when swiped left / trashed
-  expiresAt: string; // ISO timestamp when item expires / auto-deletes
+  expiresAt: string | null; // Reserved for the future retention/auto-delete feature
 }
 
 export interface StorageCategory {
