@@ -1,7 +1,8 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { MOCK_MEDIA_ITEMS } from '@/constants/mock-media';
@@ -88,6 +89,47 @@ export default function HomeScreen() {
 
     init();
   }, []);
+
+  // Refresh persisted review state whenever the Home tab regains focus.
+  // This makes items restored from Trash immediately eligible on Home.
+  useFocusEffect(
+    useCallback(() => {
+      if (hasPermission === null) return;
+
+      let cancelled = false;
+
+      async function refreshAfterFocus() {
+        try {
+          await initialize();
+          const reviewedIds = await getReviewedAssetIds();
+          const persistedTrash = await getTrashedAssets();
+
+          if (cancelled) return;
+          setDeletedItems(persistedTrash);
+
+          if (hasPermission) {
+            const result = await fetchDeviceMediaPage(20);
+            if (cancelled) return;
+            setItems(result.items.filter(item => !reviewedIds.has(item.id)));
+            setEndCursor(result.endCursor);
+            setHasNextPage(result.hasNextPage);
+          } else {
+            setItems(MOCK_MEDIA_ITEMS.filter(item => !reviewedIds.has(item.id)));
+          }
+        } catch (err) {
+          if (!cancelled) {
+            console.error('[HomeScreen] Error refreshing on focus:', err);
+          }
+        }
+      }
+
+      refreshAfterFocus();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [hasPermission])
+  );
 
   // Fetch the next page of device media when the user review stack runs low
   useEffect(() => {
