@@ -195,14 +195,38 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
   return null;
 }
 
+async function isPhysicalMediaPresent(item: TrashedMediaRow): Promise<boolean | null> {
+  if (!item.uri.startsWith('file://')) return null;
+  try {
+    const asset = await findAssetForTrashItem(item);
+    if (asset) return true;
+    return false;
+  } catch {
+    return null;
+  }
+}
+
+async function purgeStaleTrashRecords(): Promise<number> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<TrashedMediaRow>(`SELECT * FROM trashed_media ORDER BY deleted_at DESC;`);
+  let removed = 0;
+  for (const row of rows) {
+    const present = await isPhysicalMediaPresent(row);
+    if (present === false) {
+      await removeTrashRecord(row.id);
+      removed += 1;
+      console.log(`[TrashService] Removed stale Trash record for missing asset ${row.file_name} (${row.id}).`);
+    }
+  }
+  return removed;
+}
+
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
   await initialize();
   const db = await getDb();
   const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
   if (!item) throw new Error('Trash record no longer exists.');
 
-  // Android's MediaStore owns shared-storage media. Resolve the physical path
-  // directly in MediaStore so stale Expo asset IDs cannot block deletion.
   try {
     console.log(`[TrashService] Requesting native MediaStore deletion for ${item.file_name}: ${item.uri}`);
     const nativeDeleted = await deleteMediaByPath(item.uri);
@@ -215,10 +239,13 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
     console.error('[TrashService] Native MediaStore deletion failed:', error);
   }
 
-  // Fallback for platforms/records where the native path cannot resolve the asset.
   const asset = await findAssetForTrashItem(item);
   if (!asset) {
-    throw new Error('The media file could not be located in the device media library.');
+    // A Trash row can outlive its Android MediaStore asset. In that case there
+    // is nothing left to delete; remove only our stale local Trash metadata.
+    await removeTrashRecord(id);
+    console.warn(`[TrashService] Asset ${id} was already missing; removing stale Trash record.`);
+    return;
   }
 
   try {
