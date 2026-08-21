@@ -165,27 +165,24 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
   try {
     return await MediaLibrary.getAssetInfoAsync(item.id);
   } catch {
-    // Android can make the stored numeric MediaStore ID stale. Search through
-    // all pages instead of checking only the newest 100 assets.
+    // The MediaLibrary ID may become stale even while the original file URI remains valid.
   }
 
+  let after: string | undefined;
   try {
-    let after: string | undefined;
-    let pages = 0;
-    do {
-      const page = await MediaLibrary.getAssetsAsync({
+    for (let page = 0; page < 100; page += 1) {
+      const result = await MediaLibrary.getAssetsAsync({
         first: 100,
         after,
         mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
         sortBy: [MediaLibrary.SortBy.creationTime],
       });
-      const directMatch = page.assets.find(asset => asset.uri === item.uri);
-      if (directMatch) return directMatch;
-      const filenameMatch = page.assets.find(asset => asset.filename === item.file_name);
-      if (filenameMatch) return filenameMatch;
-      after = page.hasNextPage ? page.endCursor : undefined;
-      pages += 1;
-    } while (after && pages < 100);
+      const match = result.assets.find(asset => asset.uri === item.uri)
+        ?? result.assets.find(asset => asset.filename === item.file_name);
+      if (match) return match;
+      if (!result.hasNextPage || !result.endCursor) break;
+      after = result.endCursor;
+    }
   } catch (error) {
     console.error(`[TrashService] Failed to resolve asset ${item.id} from MediaLibrary:`, error);
   }
@@ -195,12 +192,18 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
 
 async function isPhysicalFilePresent(uri: string): Promise<boolean> {
   try {
-    const info = new File(uri).info();
-    return info.exists === true;
+    return new File(uri).info().exists === true;
   } catch (error) {
     console.warn(`[TrashService] Could not inspect physical file ${uri}:`, error);
     return true;
   }
+}
+
+async function deletePhysicalFile(uri: string): Promise<void> {
+  const file = new File(uri);
+  if (!file.info().exists) return;
+  console.log(`[TrashService] Deleting physical file directly: ${uri}`);
+  file.delete();
 }
 
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
@@ -209,24 +212,20 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
   if (!item) throw new Error('Trash record no longer exists.');
 
+  let mediaLibraryDeleted = false;
   const asset = await findAssetForTrashItem(item);
-  if (!asset) {
-    console.error(`[TrashService] Could not resolve ${item.file_name} (${item.id}) from MediaLibrary.`);
-    throw new Error('The media file could not be located in the device media library.');
+
+  if (asset) {
+    console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
+    try {
+      mediaLibraryDeleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
+      console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${mediaLibraryDeleted}`);
+    } catch (error) {
+      console.warn(`[TrashService] MediaLibrary deletion failed for ${asset.id}:`, error);
+    }
+  } else {
+    console.warn(`[TrashService] MediaLibrary asset could not be resolved; attempting direct URI deletion for ${item.uri}`);
   }
-
-  console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
-
-  let deleted: boolean;
-  try {
-    deleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
-  } catch (error) {
-    console.error(`[TrashService] Android media deletion threw for ${asset.id}:`, error);
-    throw new Error('Android did not authorize or complete deletion of this media file.');
-  }
-
-  console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${deleted}`);
-  if (!deleted) throw new Error('Android reported that the media file was not deleted.');
 
   const verificationDelays = [100, 250, 500, 1000, 1500, 2500];
   for (const delay of verificationDelays) {
@@ -238,8 +237,27 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
     }
   }
 
-  console.error(`[TrashService] Android reported deletion but physical file is still present: ${item.uri}`);
-  throw new Error('Android reported deletion, but the media file is still present on the device.');
+  // Some Android MediaStore entries can disappear from MediaLibrary while the
+  // underlying shared-storage file remains. In that case the stored file URI is
+  // the only remaining handle to the actual file, so attempt direct deletion.
+  try {
+    await deletePhysicalFile(item.uri);
+  } catch (error) {
+    console.error(`[TrashService] Direct physical deletion failed for ${item.uri}:`, error);
+    throw new Error('Android could not delete the media file from device storage.');
+  }
+
+  for (const delay of verificationDelays) {
+    await new Promise(resolve => setTimeout(resolve, delay));
+    if (!(await isPhysicalFilePresent(item.uri))) {
+      console.log(`[TrashService] Verified physical file is deleted after direct deletion: ${item.uri}`);
+      await removeTrashRecord(id);
+      return;
+    }
+  }
+
+  console.error(`[TrashService] Physical file remains after both MediaLibrary and direct deletion: ${item.uri}`);
+  throw new Error('The media file is still present on the device.');
 }
 
 export async function cleanupExpiredTrash(): Promise<number> {
