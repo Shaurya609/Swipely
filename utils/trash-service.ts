@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import * as MediaLibrary from 'expo-media-library';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
+import { deleteMediaByPath } from '@/modules/swipely-media-delete';
 
 export const RETENTION_OPTIONS = [7, 30, 60, 90, 0] as const;
 export type RetentionDays = (typeof RETENTION_OPTIONS)[number];
@@ -123,8 +124,7 @@ export async function restoreAsset(id: string): Promise<void> {
 
 export async function keepAsset(id: string): Promise<void> {
   await initialize();
-  const db = await getDb();
-  await db.runAsync(`INSERT OR REPLACE INTO reviewed_assets (id, action, reviewed_at) VALUES (?, ?, ?);`, [id, 'keep', new Date().toISOString()]);
+  await (await getDb()).runAsync(`INSERT OR REPLACE INTO reviewed_assets (id, action, reviewed_at) VALUES (?, ?, ?);`, [id, 'keep', new Date().toISOString()]);
 }
 
 export async function undoKeep(id: string): Promise<void> {
@@ -141,12 +141,19 @@ export async function getReviewedAssetIds(): Promise<Set<string>> {
 export async function getTrashedAssets(): Promise<TrashedAsset[]> {
   await initialize();
   const rows = await (await getDb()).getAllAsync<TrashedMediaRow>(`SELECT * FROM trashed_media ORDER BY deleted_at DESC;`);
-  return rows.map(r => ({ id: r.id, fileName: r.file_name, fileType: r.file_type, fileSize: r.file_size, dateCreated: r.date_created, source: r.source, uri: r.uri, duration: r.duration || undefined, thumbnailColor: r.thumbnail_color || undefined, deletedAt: r.deleted_at, expiresAt: r.expires_at }));
+  return rows.map(r => ({
+    id: r.id, fileName: r.file_name, fileType: r.file_type, fileSize: r.file_size,
+    dateCreated: r.date_created, source: r.source, uri: r.uri,
+    duration: r.duration || undefined, thumbnailColor: r.thumbnail_color || undefined,
+    deletedAt: r.deleted_at, expiresAt: r.expires_at,
+  }));
 }
 
 export async function getTrashStats(): Promise<{ count: number; totalSize: number }> {
   await initialize();
-  const result = await (await getDb()).getFirstAsync<{ count: number; totalSize: number | null }>(`SELECT COUNT(*) as count, SUM(file_size) as totalSize FROM trashed_media;`);
+  const result = await (await getDb()).getFirstAsync<{ count: number; totalSize: number | null }>(
+    `SELECT COUNT(*) as count, SUM(file_size) as totalSize FROM trashed_media;`
+  );
   if (!result) return { count: 0, totalSize: 0 };
   return { count: result.count, totalSize: result.totalSize || 0 };
 }
@@ -164,7 +171,7 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
   try {
     return await MediaLibrary.getAssetInfoAsync(item.id);
   } catch {
-    // The MediaLibrary ID may become stale even while the original file URI remains valid.
+    // The MediaLibrary ID can become stale on Android while the file remains.
   }
 
   let after: string | undefined;
@@ -185,23 +192,7 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
   } catch (error) {
     console.error(`[TrashService] Failed to resolve asset ${item.id} from MediaLibrary:`, error);
   }
-
   return null;
-}
-
-async function requestDeletePermission(item: TrashedMediaRow): Promise<void> {
-  const granular = item.file_type === 'video' ? ['video'] as const : ['photo'] as const;
-  const current = await MediaLibrary.getPermissionsAsync(false, [...granular]);
-  console.log(`[TrashService] Media permission before deletion: granted=${current.granted}, access=${current.accessPrivileges ?? 'unknown'}`);
-  const write = await MediaLibrary.getPermissionsAsync(true, [...granular]);
-  if (write.granted) return;
-
-  console.log(`[TrashService] Requesting Android media write permission for ${item.file_name}`);
-  const requested = await MediaLibrary.requestPermissionsAsync(true, [...granular]);
-  console.log(`[TrashService] Media write permission result: granted=${requested.granted}, access=${requested.accessPrivileges ?? 'unknown'}`);
-  if (!requested.granted) {
-    throw new Error('Android did not grant permission to delete this media file.');
-  }
 }
 
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
@@ -210,38 +201,41 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
   if (!item) throw new Error('Trash record no longer exists.');
 
-  // Deletion is a destructive media-library operation, so explicitly request
-  // Android write/delete access before resolving or deleting the asset.
-  await requestDeletePermission(item);
+  // Android's MediaStore owns shared-storage media. Resolve the physical path
+  // directly in MediaStore so stale Expo asset IDs cannot block deletion.
+  try {
+    console.log(`[TrashService] Requesting native MediaStore deletion for ${item.file_name}: ${item.uri}`);
+    const nativeDeleted = await deleteMediaByPath(item.uri);
+    console.log(`[TrashService] Native MediaStore deletion result: ${nativeDeleted}`);
+    if (nativeDeleted) {
+      await removeTrashRecord(id);
+      return;
+    }
+  } catch (error) {
+    console.error('[TrashService] Native MediaStore deletion failed:', error);
+  }
 
+  // Fallback for platforms/records where the native path cannot resolve the asset.
   const asset = await findAssetForTrashItem(item);
   if (!asset) {
-    console.error(`[TrashService] Could not resolve ${item.file_name} (${item.id}) from MediaLibrary after permission was granted.`);
     throw new Error('The media file could not be located in the device media library.');
   }
 
-  console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
-
-  let deleted: boolean;
   try {
-    deleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
+    const deleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
+    console.log(`[TrashService] MediaLibrary deletion result for ${asset.id}: ${deleted}`);
+    if (!deleted) throw new Error('Android reported that the media file was not deleted.');
   } catch (error) {
-    console.error(`[TrashService] Android media deletion threw for ${asset.id}:`, error);
+    console.error(`[TrashService] MediaLibrary deletion failed for ${asset.id}:`, error);
     throw new Error('Android did not authorize or complete deletion of this media file.');
   }
 
-  console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${deleted}`);
-  if (!deleted) throw new Error('Android reported that the media file was not deleted.');
-
-  // MediaStore can remain queryable briefly after deletion. Verify by querying
-  // the MediaLibrary, without trying to access shared storage directly.
   const verificationDelays = [100, 250, 500, 1000, 1500, 2500];
   for (const delay of verificationDelays) {
     await new Promise(resolve => setTimeout(resolve, delay));
     try {
       await MediaLibrary.getAssetInfoAsync(asset.id);
     } catch {
-      console.log(`[TrashService] Verified MediaLibrary asset ${asset.id} is deleted.`);
       await removeTrashRecord(id);
       return;
     }
@@ -256,8 +250,12 @@ export async function cleanupExpiredTrash(): Promise<number> {
   const rows = await db.getAllAsync<{ id: string }>(`SELECT id FROM trashed_media WHERE expires_at IS NOT NULL AND expires_at <= ? ORDER BY expires_at ASC;`, [new Date().toISOString()]);
   let cleaned = 0;
   for (const row of rows) {
-    try { await permanentlyDeleteAsset(row.id); cleaned += 1; }
-    catch (error) { console.error(`[TrashService] Failed to permanently delete expired asset ${row.id}:`, error); }
+    try {
+      await permanentlyDeleteAsset(row.id);
+      cleaned += 1;
+    } catch (error) {
+      console.error(`[TrashService] Failed to permanently delete expired asset ${row.id}:`, error);
+    }
   }
   return cleaned;
 }
