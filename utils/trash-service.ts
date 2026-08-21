@@ -171,6 +171,7 @@ async function assetExists(id: string): Promise<boolean> {
 
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
   await initialize();
+
   const existsBefore = await assetExists(id);
   if (!existsBefore) {
     console.warn(`[TrashService] Asset ${id} was already missing; removing stale Trash record.`);
@@ -179,11 +180,27 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   }
 
   console.log(`[TrashService] Permanently deleting asset ${id}`);
-  await MediaLibrary.deleteAssetsAsync([id]);
+
+  // deleteAssetsAsync performs Android's MediaStore-specific write/delete
+  // authorization flow for the supplied asset. Do not remove our database
+  // record unless the native operation reports success and verification passes.
+  let deleted: boolean;
+  try {
+    deleted = await MediaLibrary.deleteAssetsAsync([id]);
+  } catch (error) {
+    console.error(`[TrashService] Android media deletion threw for ${id}:`, error);
+    throw new Error('Android did not authorize or complete deletion of this media file.');
+  }
+
+  console.log(`[TrashService] deleteAssetsAsync result for ${id}: ${deleted}`);
+
+  if (!deleted) {
+    throw new Error('Android reported that the media file was not deleted.');
+  }
 
   // Android MediaStore operations can return before the asset is no longer
   // queryable. Poll briefly so we don't remove the database record prematurely.
-  const verificationDelays = [100, 250, 500, 1000];
+  const verificationDelays = [100, 250, 500, 1000, 1500];
   for (const delay of verificationDelays) {
     await new Promise(resolve => setTimeout(resolve, delay));
     if (!(await assetExists(id))) {
@@ -194,7 +211,7 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   }
 
   console.error(`[TrashService] Android reported deletion but asset ${id} is still present.`);
-  throw new Error('The media file could not be verified as deleted from the device.');
+  throw new Error('Android reported deletion, but the media file is still present on the device.');
 }
 
 export async function cleanupExpiredTrash(): Promise<number> {
