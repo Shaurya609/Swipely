@@ -28,29 +28,26 @@ interface SwipeHistory {
   direction: 'left' | 'right';
 }
 
-const DEFAULT_TRASH_RETENTION_DAYS = 30;
-
-function getTrashExpirationDate(): string {
-  return new Date(
-    Date.now() + DEFAULT_TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000
-  ).toISOString();
-}
-
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
 
+  // State of remaining items to review
   const [items, setItems] = useState<MockMediaItem[]>([]);
+  // State for session history to support Undo
   const [history, setHistory] = useState<SwipeHistory[]>([]);
+  // Tracking kept and deleted items for statistics in empty state
   const [deletedItems, setDeletedItems] = useState<MockMediaItem[]>([]);
   const [keptItems, setKeptItems] = useState<MockMediaItem[]>([]);
 
+  // Permission and pagination states
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [endCursor, setEndCursor] = useState<string | undefined>(undefined);
   const [hasNextPage, setHasNextPage] = useState<boolean>(false);
   const [isLoadingDeviceMedia, setIsLoadingDeviceMedia] = useState<boolean>(false);
 
+  // Initial permission check and media fetch on mount
   useEffect(() => {
     async function init() {
       try {
@@ -61,10 +58,11 @@ export default function HomeScreen() {
         const granted = await checkAndRequestPermissions();
         setHasPermission(granted);
 
+        const reviewedIds = await getReviewedAssetIds();
+
         if (granted) {
           setIsLoadingDeviceMedia(true);
           try {
-            const reviewedIds = await getReviewedAssetIds();
             const result = await fetchDeviceMediaPage(20);
             const reviewableItems = result.items.filter(item => !reviewedIds.has(item.id));
             setItems(reviewableItems);
@@ -77,7 +75,7 @@ export default function HomeScreen() {
             setIsLoadingDeviceMedia(false);
           }
         } else {
-          const reviewedIds = await getReviewedAssetIds();
+          // Fallback to mock media when permission is denied or unavailable
           setItems(MOCK_MEDIA_ITEMS.filter(item => !reviewedIds.has(item.id)));
         }
       } catch (err) {
@@ -91,6 +89,7 @@ export default function HomeScreen() {
     init();
   }, []);
 
+  // Fetch the next page of device media when the user review stack runs low
   useEffect(() => {
     if (!hasPermission || !hasNextPage || isLoadingDeviceMedia || items.length > 5) {
       return;
@@ -103,6 +102,7 @@ export default function HomeScreen() {
         const result = await fetchDeviceMediaPage(20, endCursor);
 
         setItems(prev => {
+          // Prevent duplicates, including assets already persisted as reviewed.
           const existingIds = new Set(prev.map(i => i.id));
           const filteredNewItems = result.items.filter(
             item => !existingIds.has(item.id) && !reviewedIds.has(item.id)
@@ -122,14 +122,17 @@ export default function HomeScreen() {
     loadMore();
   }, [items.length, hasPermission, hasNextPage, isLoadingDeviceMedia, endCursor]);
 
+  // Ref to programmatically trigger swiping on the top card via buttons
   const cardRef = useRef<MediaReviewCardRef>(null);
 
+  // Compute total size and count dynamically based on remaining items
   const reviewableSize = useMemo(() => {
     return items.reduce((sum, item) => sum + item.fileSize, 0);
   }, [items]);
 
   const reviewableCount = items.length;
 
+  // Compute space saved from deleted items
   const spaceSaved = useMemo(() => {
     return deletedItems.reduce((sum, item) => sum + item.fileSize, 0);
   }, [deletedItems]);
@@ -140,7 +143,7 @@ export default function HomeScreen() {
     }
 
     try {
-      await trashAsset(item, getTrashExpirationDate());
+      await trashAsset(item);
 
       setHistory(h => {
         if (h.some(entry => entry.item.id === item.id)) return h;
@@ -238,7 +241,7 @@ export default function HomeScreen() {
 
   return (
     <GestureHandlerRootView style={styles.container}>
-      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}>
+      <ThemedView style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom || 16 }]}> 
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" />
