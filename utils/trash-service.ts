@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import * as MediaLibrary from 'expo-media-library';
+import { File } from 'expo-file-system';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
 
 export const RETENTION_OPTIONS = [7, 30, 60, 90, 0] as const;
@@ -162,11 +163,10 @@ async function removeTrashRecord(id: string): Promise<void> {
 
 async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrary.Asset | null> {
   try {
-    const info = await MediaLibrary.getAssetInfoAsync(item.id);
-    return info;
+    return await MediaLibrary.getAssetInfoAsync(item.id);
   } catch {
-    // The stored numeric ID can become stale on Android. Fall back to a
-    // fresh MediaLibrary query using the original URI and filename.
+    // The stored numeric ID can become stale on Android. Fall back to a fresh
+    // MediaLibrary query using the original URI and filename.
   }
 
   try {
@@ -175,33 +175,33 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
       mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
       sortBy: [MediaLibrary.SortBy.creationTime],
     });
-    const directMatch = page.assets.find(asset => asset.uri === item.uri);
-    if (directMatch) return directMatch;
-
-    const filenameMatch = page.assets.find(asset => asset.filename === item.file_name);
-    if (filenameMatch) return filenameMatch;
+    return page.assets.find(asset => asset.uri === item.uri)
+      ?? page.assets.find(asset => asset.filename === item.file_name)
+      ?? null;
   } catch (error) {
     console.error(`[TrashService] Failed to resolve asset ${item.id} from MediaLibrary:`, error);
+    return null;
   }
+}
 
-  return null;
+async function isPhysicalFilePresent(uri: string): Promise<boolean> {
+  try {
+    const info = new File(uri).info();
+    return info.exists === true;
+  } catch (error) {
+    console.warn(`[TrashService] Could not inspect physical file ${uri}:`, error);
+    return true;
+  }
 }
 
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
   await initialize();
   const db = await getDb();
   const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
-
-  if (!item) {
-    throw new Error('Trash record no longer exists.');
-  }
+  if (!item) throw new Error('Trash record no longer exists.');
 
   const asset = await findAssetForTrashItem(item);
-
-  if (!asset) {
-    console.error(`[TrashService] Could not resolve ${item.file_name} (${item.id}) from MediaLibrary.`);
-    throw new Error('The media file could not be located in the device media library.');
-  }
+  if (!asset) throw new Error('The media file could not be located in the device media library.');
 
   console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
 
@@ -214,24 +214,21 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   }
 
   console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${deleted}`);
+  if (!deleted) throw new Error('Android reported that the media file was not deleted.');
 
-  if (!deleted) {
-    throw new Error('Android reported that the media file was not deleted.');
-  }
-
-  const verificationDelays = [100, 250, 500, 1000, 1500];
+  // MediaStore may remain queryable briefly after deletion. Verify the actual
+  // filesystem URI because that is the state the user ultimately cares about.
+  const verificationDelays = [100, 250, 500, 1000, 1500, 2500];
   for (const delay of verificationDelays) {
     await new Promise(resolve => setTimeout(resolve, delay));
-    try {
-      await MediaLibrary.getAssetInfoAsync(asset.id);
-    } catch {
-      console.log(`[TrashService] Verified asset ${asset.id} is deleted.`);
+    if (!(await isPhysicalFilePresent(item.uri))) {
+      console.log(`[TrashService] Verified physical file is deleted: ${item.uri}`);
       await removeTrashRecord(id);
       return;
     }
   }
 
-  console.error(`[TrashService] Android reported deletion but asset ${asset.id} is still present.`);
+  console.error(`[TrashService] Android reported deletion but physical file is still present: ${item.uri}`);
   throw new Error('Android reported deletion, but the media file is still present on the device.');
 }
 
