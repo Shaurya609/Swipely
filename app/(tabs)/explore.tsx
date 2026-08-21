@@ -217,7 +217,11 @@ export default function TrashScreen() {
                 style={[styles.retentionOption, selected && styles.retentionOptionSelected]}
                 activeOpacity={0.8}
               >
-                <ThemedText style={[styles.retentionOptionText, selected && styles.retentionOptionTextSelected]}>
+                <ThemedText
+                  lightColor="#1C1C1E"
+                  darkColor="#1C1C1E"
+                  style={[styles.retentionOptionText, selected && styles.retentionOptionTextSelected]}
+                >
                   {retentionLabel(option)}
                 </ThemedText>
               </TouchableOpacity>
