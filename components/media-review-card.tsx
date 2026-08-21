@@ -1,5 +1,5 @@
-import React, { forwardRef, useImperativeHandle } from 'react';
-import { StyleSheet, Text, useWindowDimensions } from 'react-native';
+import React, { forwardRef, useImperativeHandle, useState } from 'react';
+import { StyleSheet, Text, useWindowDimensions, Modal, TouchableOpacity, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -10,6 +10,10 @@ import Animated, {
   interpolate,
   Extrapolation,
 } from 'react-native-reanimated';
+import * as WebBrowser from 'expo-web-browser';
+import { Image } from 'expo-image';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { MockMediaItem } from '../types/media';
 import { MediaPreviewContainer } from './media-preview-container';
 
@@ -26,10 +30,33 @@ interface MediaReviewCardProps {
   style?: any;
 }
 
+interface VideoPlayerViewProps {
+  uri: string;
+  style?: any;
+}
+
+const VideoPlayerView = ({ uri, style }: VideoPlayerViewProps) => {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.play();
+  });
+
+  return (
+    <VideoView
+      style={style}
+      player={player}
+      allowsFullscreen
+      allowsPictureInPicture
+    />
+  );
+};
+
 export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardProps>(
   ({ item, onSwipeLeft, onSwipeRight, isTop, style }, ref) => {
     const { width: screenWidth } = useWindowDimensions();
     const SWIPE_THRESHOLD = screenWidth * 0.35;
+
+    const [isPreviewVisible, setIsPreviewVisible] = useState(false);
 
     // Translation values
     const translateX = useSharedValue(0);
@@ -120,10 +147,33 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
       return { opacity };
     });
 
+    const handlePress = async () => {
+      const isRemote = item.uri.startsWith('http://') || item.uri.startsWith('https://');
+      if (isRemote) {
+        try {
+          await WebBrowser.openBrowserAsync(item.uri, {
+            presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
+          });
+        } catch (error) {
+          console.error('Error opening preview:', error);
+        }
+      } else {
+        setIsPreviewVisible(true);
+      }
+    };
+
+    const tapGesture = Gesture.Tap()
+      .enabled(isTop)
+      .onEnd(() => {
+        runOnJS(handlePress)();
+      });
+
+    const combinedGesture = Gesture.Exclusive(panGesture, tapGesture);
+
     return (
-      <GestureDetector gesture={panGesture}>
+      <GestureDetector gesture={combinedGesture}>
         <Animated.View style={[styles.cardWrapper, style, isTop && animatedCardStyle]}>
-          <MediaPreviewContainer item={item} />
+          <MediaPreviewContainer item={item} isTop={isTop} />
 
           {/* Swipe Visual Feedback Badges (Floating Overlays) */}
           {isTop && (
@@ -137,6 +187,48 @@ export const MediaReviewCard = forwardRef<MediaReviewCardRef, MediaReviewCardPro
               </Animated.View>
             </>
           )}
+
+          {/* Full Screen Native Media Preview Modal */}
+          <Modal
+            visible={isPreviewVisible}
+            transparent={false}
+            animationType="slide"
+            onRequestClose={() => setIsPreviewVisible(false)}
+          >
+            <View style={styles.modalContainer}>
+              {/* Header Panel */}
+              <View style={styles.modalHeader}>
+                <View style={styles.modalMeta}>
+                  <Text style={styles.modalTitle} numberOfLines={1}>
+                    {item.fileName}
+                  </Text>
+                  <Text style={styles.modalSubtitle}>
+                    {(item.fileSize / (1024 * 1024)).toFixed(2)} MB
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.closeButton}
+                  onPress={() => setIsPreviewVisible(false)}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons name="close" size={26} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Media Preview Viewport */}
+              <View style={styles.modalContent}>
+                {item.fileType === 'video' ? (
+                  <VideoPlayerView uri={item.uri} style={styles.fullVideo} />
+                ) : (
+                  <Image
+                    source={{ uri: item.uri }}
+                    style={styles.fullImage}
+                    contentFit="contain"
+                  />
+                )}
+              </View>
+            </View>
+          </Modal>
         </Animated.View>
       </GestureDetector>
     );
@@ -188,5 +280,55 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#FFFFFF',
     letterSpacing: 2,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 15,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    zIndex: 10,
+  },
+  modalMeta: {
+    flex: 1,
+    marginRight: 15,
+  },
+  modalTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  modalSubtitle: {
+    color: '#AAAAAA',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  fullImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fullVideo: {
+    width: '100%',
+    height: '100%',
   },
 });

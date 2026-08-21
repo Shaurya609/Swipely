@@ -9,9 +9,10 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 interface MediaPreviewContainerProps {
   item: MockMediaItem;
+  isTop?: boolean;
 }
 
-export function MediaPreviewContainer({ item }: MediaPreviewContainerProps) {
+export function MediaPreviewContainer({ item, isTop }: MediaPreviewContainerProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -43,18 +44,19 @@ export function MediaPreviewContainer({ item }: MediaPreviewContainerProps) {
       {/* Media Preview Aspect Area */}
       <View style={styles.previewContainer}>
         {isDoc ? (
-          /* Document/PDF Stylized Mock Preview */
-          <View style={[styles.docPreview, { backgroundColor: item.thumbnailColor ?? '#F2F2F7' }]}>
-            <View style={styles.docIconCircle}>
-              <MaterialIcons name="picture-as-pdf" size={48} color="#FF3B30" />
-            </View>
-            <ThemedText type="defaultSemiBold" style={styles.docPlaceholderText}>
-              PDF Document Preview
-            </ThemedText>
-            <View style={styles.docLinesContainer}>
-              <View style={[styles.docLine, { width: '80%' }]} />
-              <View style={[styles.docLine, { width: '90%' }]} />
-              <View style={[styles.docLine, { width: '60%' }]} />
+          /* Visual Media Image Preview for Documents/PDFs */
+          <View style={styles.imageWrapper}>
+            <Image
+              source={{ uri: item.uri }}
+              style={styles.image}
+              contentFit="cover"
+              transition={200}
+            />
+            {/* Elegant overlay to indicate it's a PDF */}
+            <View style={styles.videoOverlay}>
+              <View style={[styles.playButton, { backgroundColor: 'rgba(255, 255, 255, 0.95)', borderColor: '#FF3B30' }]}>
+                <MaterialIcons name="picture-as-pdf" size={36} color="#FF3B30" />
+              </View>
             </View>
           </View>
         ) : (
@@ -101,6 +103,14 @@ export function MediaPreviewContainer({ item }: MediaPreviewContainerProps) {
             color={isDark ? '#FFF' : '#333'} 
           />
         </View>
+
+        {/* Interactive Full Preview Prompter */}
+        {isTop && (
+          <View style={styles.inspectPrompt}>
+            <MaterialIcons name="visibility" size={14} color="#FFF" />
+            <Text style={styles.inspectText}>Tap to full inspect</Text>
+          </View>
+        )}
       </View>
 
       {/* Info & Metadata Area */}
@@ -320,5 +330,23 @@ const styles = StyleSheet.create({
     width: 1,
     height: 28,
     marginHorizontal: 16,
+  },
+  inspectPrompt: {
+    position: 'absolute',
+    bottom: 12,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    zIndex: 20,
+  },
+  inspectText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

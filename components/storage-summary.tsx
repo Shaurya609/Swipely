@@ -8,9 +8,10 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 interface StorageSummaryProps {
   reviewableSize: number; // Current total size of remaining files to review
   reviewableCount: number; // Current count of files to review
+  cleanedSize: number; // Total size of deleted/cleaned files
 }
 
-export function StorageSummary({ reviewableSize, reviewableCount }: StorageSummaryProps) {
+export function StorageSummary({ reviewableSize, reviewableCount, cleanedSize }: StorageSummaryProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -56,6 +57,19 @@ export function StorageSummary({ reviewableSize, reviewableCount }: StorageSumma
         </View>
         <ThemedText type="subtitle" style={styles.reviewAmount} lightColor="#0a7ea4" darkColor="#fff">
           {formatFileSize(reviewableSize)}
+        </ThemedText>
+      </View>
+
+      {/* Cleaned by Swipely Box */}
+      <View style={[styles.reviewBox, isDark ? styles.boxDark : styles.boxLight, { marginTop: 8 }]}>
+        <View style={styles.indicatorContainer}>
+          <View style={[styles.reviewIndicator, { backgroundColor: '#34C759' }]} />
+          <ThemedText type="defaultSemiBold" style={styles.reviewTitle}>
+            Cleaned by Swipely
+          </ThemedText>
+        </View>
+        <ThemedText type="subtitle" style={[styles.reviewAmount, { color: '#34C759' }]}>
+          {formatFileSize(cleanedSize)}
         </ThemedText>
       </View>
     </ThemedView>
