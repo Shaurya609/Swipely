@@ -37,8 +37,7 @@ class SwipelyMediaDeleteModule : Module() {
 
       val resolver = context.contentResolver
       try {
-        val deletedRows = resolver.delete(mediaUri, null, null)
-        if (deletedRows > 0) {
+        if (resolver.delete(mediaUri, null, null) > 0) {
           promise.resolve(true)
           return@AsyncFunction
         }
@@ -109,14 +108,8 @@ class SwipelyMediaDeleteModule : Module() {
         val id = cursor.getLong(idColumn)
         val mediaType = cursor.getInt(typeColumn)
         return when (mediaType) {
-          MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> ContentUris.withAppendedId(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            id
-          )
-          MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> ContentUris.withAppendedId(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            id
-          )
+          MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, id)
+          MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
           else -> ContentUris.withAppendedId(collection, id)
         }
       }
