@@ -90,27 +90,36 @@ class SwipelyMediaDeleteModule : Module() {
     val fileName = targetPath.substringAfterLast('/')
     val relativePath = relativePathFor(targetPath)
 
-    // Android 11+ exposes RELATIVE_PATH/DISPLAY_NAME for scoped-storage media.
-    // Prefer this lookup instead of relying on the legacy DATA column.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      val imageUri = findInCollection(
+      findInCollection(
         resolver,
         MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
         fileName,
         relativePath
-      )
-      if (imageUri != null) return imageUri
+      )?.let { return it }
 
-      val videoUri = findInCollection(
+      findInCollection(
         resolver,
         MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
         fileName,
         relativePath
-      )
-      if (videoUri != null) return videoUri
+      )?.let { return it }
+
+      // Some OEM MediaStore implementations return a missing/empty
+      // RELATIVE_PATH. Fall back to DISPLAY_NAME alone before giving up.
+      findByDisplayName(
+        resolver,
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+        fileName
+      )?.let { return it }
+
+      findByDisplayName(
+        resolver,
+        MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+        fileName
+      )?.let { return it }
     }
 
-    // Legacy fallback for older Android/provider implementations.
     val collection = MediaStore.Files.getContentUri("external")
     val projection = arrayOf(
       MediaStore.Files.FileColumns._ID,
@@ -147,14 +156,36 @@ class SwipelyMediaDeleteModule : Module() {
     fileName: String,
     relativePath: String
   ): Uri? {
-    val projection = arrayOf(MediaStore.MediaColumns._ID)
-
     return try {
       resolver.query(
         collection,
-        projection,
+        arrayOf(MediaStore.MediaColumns._ID),
         "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?",
         arrayOf(fileName, relativePath),
+        null
+      )?.use { cursor ->
+        if (!cursor.moveToFirst()) null
+        else ContentUris.withAppendedId(
+          collection,
+          cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+        )
+      }
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  private fun findByDisplayName(
+    resolver: android.content.ContentResolver,
+    collection: Uri,
+    fileName: String
+  ): Uri? {
+    return try {
+      resolver.query(
+        collection,
+        arrayOf(MediaStore.MediaColumns._ID),
+        "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+        arrayOf(fileName),
         null
       )?.use { cursor ->
         if (!cursor.moveToFirst()) null
