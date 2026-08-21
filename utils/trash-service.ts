@@ -160,57 +160,78 @@ async function removeTrashRecord(id: string): Promise<void> {
   });
 }
 
-async function assetExists(id: string): Promise<boolean> {
+async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrary.Asset | null> {
   try {
-    await MediaLibrary.getAssetInfoAsync(id);
-    return true;
+    const info = await MediaLibrary.getAssetInfoAsync(item.id);
+    return info;
   } catch {
-    return false;
+    // The stored numeric ID can become stale on Android. Fall back to a
+    // fresh MediaLibrary query using the original URI and filename.
   }
+
+  try {
+    const page = await MediaLibrary.getAssetsAsync({
+      first: 100,
+      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+      sortBy: [MediaLibrary.SortBy.creationTime],
+    });
+    const directMatch = page.assets.find(asset => asset.uri === item.uri);
+    if (directMatch) return directMatch;
+
+    const filenameMatch = page.assets.find(asset => asset.filename === item.file_name);
+    if (filenameMatch) return filenameMatch;
+  } catch (error) {
+    console.error(`[TrashService] Failed to resolve asset ${item.id} from MediaLibrary:`, error);
+  }
+
+  return null;
 }
 
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
   await initialize();
+  const db = await getDb();
+  const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
 
-  const existsBefore = await assetExists(id);
-  if (!existsBefore) {
-    console.warn(`[TrashService] Asset ${id} was already missing; removing stale Trash record.`);
-    await removeTrashRecord(id);
-    return;
+  if (!item) {
+    throw new Error('Trash record no longer exists.');
   }
 
-  console.log(`[TrashService] Permanently deleting asset ${id}`);
+  const asset = await findAssetForTrashItem(item);
 
-  // deleteAssetsAsync performs Android's MediaStore-specific write/delete
-  // authorization flow for the supplied asset. Do not remove our database
-  // record unless the native operation reports success and verification passes.
+  if (!asset) {
+    console.error(`[TrashService] Could not resolve ${item.file_name} (${item.id}) from MediaLibrary.`);
+    throw new Error('The media file could not be located in the device media library.');
+  }
+
+  console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
+
   let deleted: boolean;
   try {
-    deleted = await MediaLibrary.deleteAssetsAsync([id]);
+    deleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
   } catch (error) {
-    console.error(`[TrashService] Android media deletion threw for ${id}:`, error);
+    console.error(`[TrashService] Android media deletion threw for ${asset.id}:`, error);
     throw new Error('Android did not authorize or complete deletion of this media file.');
   }
 
-  console.log(`[TrashService] deleteAssetsAsync result for ${id}: ${deleted}`);
+  console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${deleted}`);
 
   if (!deleted) {
     throw new Error('Android reported that the media file was not deleted.');
   }
 
-  // Android MediaStore operations can return before the asset is no longer
-  // queryable. Poll briefly so we don't remove the database record prematurely.
   const verificationDelays = [100, 250, 500, 1000, 1500];
   for (const delay of verificationDelays) {
     await new Promise(resolve => setTimeout(resolve, delay));
-    if (!(await assetExists(id))) {
-      console.log(`[TrashService] Verified asset ${id} is deleted.`);
+    try {
+      await MediaLibrary.getAssetInfoAsync(asset.id);
+    } catch {
+      console.log(`[TrashService] Verified asset ${asset.id} is deleted.`);
       await removeTrashRecord(id);
       return;
     }
   }
 
-  console.error(`[TrashService] Android reported deletion but asset ${id} is still present.`);
+  console.error(`[TrashService] Android reported deletion but asset ${asset.id} is still present.`);
   throw new Error('Android reported deletion, but the media file is still present on the device.');
 }
 
