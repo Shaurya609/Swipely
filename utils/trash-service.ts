@@ -1,6 +1,5 @@
 import * as SQLite from 'expo-sqlite';
 import * as MediaLibrary from 'expo-media-library';
-import { File } from 'expo-file-system';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
 
 export const RETENTION_OPTIONS = [7, 30, 60, 90, 0] as const;
@@ -190,20 +189,19 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
   return null;
 }
 
-async function isPhysicalFilePresent(uri: string): Promise<boolean> {
-  try {
-    return new File(uri).info().exists === true;
-  } catch (error) {
-    console.warn(`[TrashService] Could not inspect physical file ${uri}:`, error);
-    return true;
-  }
-}
+async function requestDeletePermission(item: TrashedMediaRow): Promise<void> {
+  const granular = item.file_type === 'video' ? ['video'] as const : ['photo'] as const;
+  const current = await MediaLibrary.getPermissionsAsync(false, [...granular]);
+  console.log(`[TrashService] Media permission before deletion: granted=${current.granted}, access=${current.accessPrivileges ?? 'unknown'}`);
+  const write = await MediaLibrary.getPermissionsAsync(true, [...granular]);
+  if (write.granted) return;
 
-async function deletePhysicalFile(uri: string): Promise<void> {
-  const file = new File(uri);
-  if (!file.info().exists) return;
-  console.log(`[TrashService] Deleting physical file directly: ${uri}`);
-  file.delete();
+  console.log(`[TrashService] Requesting Android media write permission for ${item.file_name}`);
+  const requested = await MediaLibrary.requestPermissionsAsync(true, [...granular]);
+  console.log(`[TrashService] Media write permission result: granted=${requested.granted}, access=${requested.accessPrivileges ?? 'unknown'}`);
+  if (!requested.granted) {
+    throw new Error('Android did not grant permission to delete this media file.');
+  }
 }
 
 export async function permanentlyDeleteAsset(id: string): Promise<void> {
@@ -212,52 +210,44 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   const item = await db.getFirstAsync<TrashedMediaRow>(`SELECT * FROM trashed_media WHERE id = ?;`, [id]);
   if (!item) throw new Error('Trash record no longer exists.');
 
-  let mediaLibraryDeleted = false;
-  const asset = await findAssetForTrashItem(item);
+  // Deletion is a destructive media-library operation, so explicitly request
+  // Android write/delete access before resolving or deleting the asset.
+  await requestDeletePermission(item);
 
-  if (asset) {
-    console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
-    try {
-      mediaLibraryDeleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
-      console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${mediaLibraryDeleted}`);
-    } catch (error) {
-      console.warn(`[TrashService] MediaLibrary deletion failed for ${asset.id}:`, error);
-    }
-  } else {
-    console.warn(`[TrashService] MediaLibrary asset could not be resolved; attempting direct URI deletion for ${item.uri}`);
+  const asset = await findAssetForTrashItem(item);
+  if (!asset) {
+    console.error(`[TrashService] Could not resolve ${item.file_name} (${item.id}) from MediaLibrary after permission was granted.`);
+    throw new Error('The media file could not be located in the device media library.');
   }
 
+  console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
+
+  let deleted: boolean;
+  try {
+    deleted = await MediaLibrary.deleteAssetsAsync([asset.id]);
+  } catch (error) {
+    console.error(`[TrashService] Android media deletion threw for ${asset.id}:`, error);
+    throw new Error('Android did not authorize or complete deletion of this media file.');
+  }
+
+  console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${deleted}`);
+  if (!deleted) throw new Error('Android reported that the media file was not deleted.');
+
+  // MediaStore can remain queryable briefly after deletion. Verify by querying
+  // the MediaLibrary, without trying to access shared storage directly.
   const verificationDelays = [100, 250, 500, 1000, 1500, 2500];
   for (const delay of verificationDelays) {
     await new Promise(resolve => setTimeout(resolve, delay));
-    if (!(await isPhysicalFilePresent(item.uri))) {
-      console.log(`[TrashService] Verified physical file is deleted: ${item.uri}`);
+    try {
+      await MediaLibrary.getAssetInfoAsync(asset.id);
+    } catch {
+      console.log(`[TrashService] Verified MediaLibrary asset ${asset.id} is deleted.`);
       await removeTrashRecord(id);
       return;
     }
   }
 
-  // Some Android MediaStore entries can disappear from MediaLibrary while the
-  // underlying shared-storage file remains. In that case the stored file URI is
-  // the only remaining handle to the actual file, so attempt direct deletion.
-  try {
-    await deletePhysicalFile(item.uri);
-  } catch (error) {
-    console.error(`[TrashService] Direct physical deletion failed for ${item.uri}:`, error);
-    throw new Error('Android could not delete the media file from device storage.');
-  }
-
-  for (const delay of verificationDelays) {
-    await new Promise(resolve => setTimeout(resolve, delay));
-    if (!(await isPhysicalFilePresent(item.uri))) {
-      console.log(`[TrashService] Verified physical file is deleted after direct deletion: ${item.uri}`);
-      await removeTrashRecord(id);
-      return;
-    }
-  }
-
-  console.error(`[TrashService] Physical file remains after both MediaLibrary and direct deletion: ${item.uri}`);
-  throw new Error('The media file is still present on the device.');
+  throw new Error('Android reported deletion, but the media library still contains the asset.');
 }
 
 export async function cleanupExpiredTrash(): Promise<number> {
