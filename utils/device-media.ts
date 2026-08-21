@@ -1,5 +1,5 @@
 import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { MockMediaItem, MediaType } from '../types/media';
 
 // Cache for albumId to albumTitle lookup to avoid calling getAlbumsAsync repeatedly
@@ -102,35 +102,26 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * Fetches accurate size for a specific asset by checking EXIF metadata and local file system info
+ * Fetches the file size without requesting full MediaLibrary asset metadata.
+ *
+ * Calling MediaLibrary.getAssetInfoAsync() on Android can trigger EXIF access,
+ * which requires ACCESS_MEDIA_LOCATION. Swipely only needs the file size here,
+ * so use the asset URI directly with the modern expo-file-system File API.
  */
 async function fetchAssetSize(assetId: string, fallbackUri?: string): Promise<number> {
+  if (!fallbackUri) {
+    return 0;
+  }
+
   try {
-    const assetInfo = await MediaLibrary.getAssetInfoAsync(assetId);
-    
-    // 1. Check EXIF data (often populated on iOS/Android for files)
-    if (assetInfo.exif && typeof assetInfo.exif === 'object') {
-      const exifSize = (assetInfo.exif as any).FileSize || (assetInfo.exif as any).fileSize;
-      if (typeof exifSize === 'number' && exifSize > 0) {
-        return exifSize;
-      }
-    }
+    const file = new File(fallbackUri);
+    const fileInfo = file.info();
 
-    // 2. Check if size is directly present in AssetInfo (often true for some platforms/versions)
-    if ('size' in assetInfo && typeof (assetInfo as any).size === 'number' && (assetInfo as any).size > 0) {
-      return (assetInfo as any).size;
+    if (typeof fileInfo.size === 'number' && fileInfo.size > 0) {
+      return fileInfo.size;
     }
-
-    // 3. Query the local file system on the localUri or standard uri
-    const uriToQuery = assetInfo.localUri || assetInfo.uri || fallbackUri;
-    if (uriToQuery) {
-      const fileInfo = await FileSystem.getInfoAsync(uriToQuery);
-      if (fileInfo.exists && fileInfo.size !== undefined) {
-        return fileInfo.size;
-      }
-    }
-  } catch (error) {
-    console.error(`[DeviceMedia] Error retrieving size for asset ${assetId}:`, error);
+  } catch {
+    // Some MediaStore URIs may not expose file metadata. Keep the asset usable.
   }
 
   return 0; // Fallback indicator
