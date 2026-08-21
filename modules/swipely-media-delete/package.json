@@ -1,0 +1,10 @@
+{
+  "name": "swipely-media-delete",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.ts",
+  "platforms": ["android"],
+  "dependencies": {
+    "expo": "~54.0.35"
+  }
+}
