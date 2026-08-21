@@ -165,23 +165,32 @@ async function findAssetForTrashItem(item: TrashedMediaRow): Promise<MediaLibrar
   try {
     return await MediaLibrary.getAssetInfoAsync(item.id);
   } catch {
-    // The stored numeric ID can become stale on Android. Fall back to a fresh
-    // MediaLibrary query using the original URI and filename.
+    // Android can make the stored numeric MediaStore ID stale. Search through
+    // all pages instead of checking only the newest 100 assets.
   }
 
   try {
-    const page = await MediaLibrary.getAssetsAsync({
-      first: 100,
-      mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
-      sortBy: [MediaLibrary.SortBy.creationTime],
-    });
-    return page.assets.find(asset => asset.uri === item.uri)
-      ?? page.assets.find(asset => asset.filename === item.file_name)
-      ?? null;
+    let after: string | undefined;
+    let pages = 0;
+    do {
+      const page = await MediaLibrary.getAssetsAsync({
+        first: 100,
+        after,
+        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        sortBy: [MediaLibrary.SortBy.creationTime],
+      });
+      const directMatch = page.assets.find(asset => asset.uri === item.uri);
+      if (directMatch) return directMatch;
+      const filenameMatch = page.assets.find(asset => asset.filename === item.file_name);
+      if (filenameMatch) return filenameMatch;
+      after = page.hasNextPage ? page.endCursor : undefined;
+      pages += 1;
+    } while (after && pages < 100);
   } catch (error) {
     console.error(`[TrashService] Failed to resolve asset ${item.id} from MediaLibrary:`, error);
-    return null;
   }
+
+  return null;
 }
 
 async function isPhysicalFilePresent(uri: string): Promise<boolean> {
@@ -201,7 +210,10 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   if (!item) throw new Error('Trash record no longer exists.');
 
   const asset = await findAssetForTrashItem(item);
-  if (!asset) throw new Error('The media file could not be located in the device media library.');
+  if (!asset) {
+    console.error(`[TrashService] Could not resolve ${item.file_name} (${item.id}) from MediaLibrary.`);
+    throw new Error('The media file could not be located in the device media library.');
+  }
 
   console.log(`[TrashService] Deleting ${item.file_name}: storedId=${item.id}, currentId=${asset.id}, uri=${asset.uri}`);
 
@@ -216,8 +228,6 @@ export async function permanentlyDeleteAsset(id: string): Promise<void> {
   console.log(`[TrashService] deleteAssetsAsync result for ${asset.id}: ${deleted}`);
   if (!deleted) throw new Error('Android reported that the media file was not deleted.');
 
-  // MediaStore may remain queryable briefly after deletion. Verify the actual
-  // filesystem URI because that is the state the user ultimately cares about.
   const verificationDelays = [100, 250, 500, 1000, 1500, 2500];
   for (const delay of verificationDelays) {
     await new Promise(resolve => setTimeout(resolve, delay));
