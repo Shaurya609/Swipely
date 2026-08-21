@@ -12,6 +12,19 @@ export interface MockMediaItem {
   thumbnailColor?: string; // backup solid or gradient color representation
 }
 
+export type SwipeAction = 'keep' | 'trash';
+
+export interface ReviewedAssetRef {
+  id: string;
+  action: SwipeAction;
+  reviewedAt: string; // ISO timestamp when reviewed
+}
+
+export interface TrashedAsset extends MockMediaItem {
+  deletedAt: string; // ISO timestamp when swiped left / trashed
+  expiresAt: string; // ISO timestamp when item expires / auto-deletes
+}
+
 export interface StorageCategory {
   name: string;
   size: number; // in bytes
