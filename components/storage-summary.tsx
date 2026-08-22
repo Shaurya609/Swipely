@@ -60,12 +60,12 @@ export function StorageSummary({ reviewableSize, reviewableCount, cleanedSize }:
         </ThemedText>
       </View>
 
-      {/* Cleaned by Swipely Box */}
+      {/* Cleaned by SwyftPix Box */}
       <View style={[styles.reviewBox, isDark ? styles.boxDark : styles.boxLight, { marginTop: 8 }]}>
         <View style={styles.indicatorContainer}>
           <View style={[styles.reviewIndicator, { backgroundColor: '#34C759' }]} />
           <ThemedText type="defaultSemiBold" style={styles.reviewTitle}>
-            Cleaned by Swipely
+            Cleaned by SwyftPix
           </ThemedText>
         </View>
         <ThemedText type="subtitle" style={[styles.reviewAmount, { color: '#34C759' }]}>

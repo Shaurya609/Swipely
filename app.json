@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "Swipely",
-    "slug": "Swipely",
+    "name": "SwyftPix",
+    "slug": "swyftpix",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "swipely",
+    "scheme": "swyftpix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "package": "com.swipely.app",
+      "package": "com.swyftpix.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

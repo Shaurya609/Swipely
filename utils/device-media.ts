@@ -105,7 +105,7 @@ function formatDuration(seconds: number): string {
  * Fetches the file size without requesting full MediaLibrary asset metadata.
  *
  * Calling MediaLibrary.getAssetInfoAsync() on Android can trigger EXIF access,
- * which requires ACCESS_MEDIA_LOCATION. Swipely only needs the file size here,
+ * which requires ACCESS_MEDIA_LOCATION. SwyftPix only needs the file size here,
  * so use the asset URI directly with the modern expo-file-system File API.
  */
 async function fetchAssetSize(assetId: string, fallbackUri?: string): Promise<number> {

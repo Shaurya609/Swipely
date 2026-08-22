@@ -287,7 +287,7 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <MaterialIcons name="auto-awesome" size={24} color="#0a7ea4" />
-            <ThemedText style={styles.headerTitle} type="title">Swipely</ThemedText>
+            <ThemedText style={styles.headerTitle} type="title">SwyftPix</ThemedText>
           </View>
           <ThemedText style={styles.headerSubtitle} lightColor="#687076" darkColor="#9BA1A6">
             Clean up your storage

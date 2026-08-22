@@ -1,7 +1,7 @@
 import * as SQLite from 'expo-sqlite';
 import * as MediaLibrary from 'expo-media-library';
 import { MockMediaItem, TrashedAsset } from '@/types/media';
-import { deleteMediaByPath } from '@/modules/swipely-media-delete';
+import { deleteMediaByPath } from '@/modules/swyftpix-media-delete';
 
 export const RETENTION_OPTIONS = [7, 30, 60, 90, 0] as const;
 export type RetentionDays = (typeof RETENTION_OPTIONS)[number];
@@ -28,7 +28,7 @@ let initializationPromise: Promise<void> | null = null;
 async function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (dbInstance) return dbInstance;
   if (!dbOpenPromise) {
-    dbOpenPromise = SQLite.openDatabaseAsync('swipely.db')
+    dbOpenPromise = SQLite.openDatabaseAsync('swyftpix.db')
       .then(db => { dbInstance = db; return db; })
       .finally(() => { dbOpenPromise = null; });
   }
