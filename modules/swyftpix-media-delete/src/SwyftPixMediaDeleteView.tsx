@@ -1,11 +1,11 @@
 import { requireNativeView } from 'expo';
 import * as React from 'react';
 
-import { SwipelyMediaDeleteViewProps } from './SwipelyMediaDelete.types';
+import { SwyftPixMediaDeleteViewProps } from './SwyftPixMediaDelete.types';
 
-const NativeView: React.ComponentType<SwipelyMediaDeleteViewProps> =
-  requireNativeView('SwipelyMediaDelete');
+const NativeView: React.ComponentType<SwyftPixMediaDeleteViewProps> =
+  requireNativeView('SwyftPixMediaDelete');
 
-export default function SwipelyMediaDeleteView(props: SwipelyMediaDeleteViewProps) {
+export default function SwyftPixMediaDeleteView(props: SwyftPixMediaDeleteViewProps) {
   return <NativeView {...props} />;
 }

@@ -1,6 +1,6 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["expo.modules.swipelymedia.SwipelyMediaDeleteModule"]
+    "modules": ["expo.modules.swyftpixmedia.SwyftPixMediaDeleteModule"]
   }
 }

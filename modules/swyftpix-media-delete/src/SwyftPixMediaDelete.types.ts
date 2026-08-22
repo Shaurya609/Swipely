@@ -4,7 +4,7 @@ export type OnLoadEventPayload = {
   url: string;
 };
 
-export type SwipelyMediaDeleteModuleEvents = {
+export type SwyftPixMediaDeleteModuleEvents = {
   onChange: (params: ChangeEventPayload) => void;
 };
 
@@ -12,7 +12,7 @@ export type ChangeEventPayload = {
   value: string;
 };
 
-export type SwipelyMediaDeleteViewProps = {
+export type SwyftPixMediaDeleteViewProps = {
   url: string;
   onLoad: (event: { nativeEvent: OnLoadEventPayload }) => void;
   style?: StyleProp<ViewStyle>;

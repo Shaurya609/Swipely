@@ -1,12 +1,12 @@
 import { NativeModule, requireNativeModule } from 'expo';
 
-import { SwipelyMediaDeleteModuleEvents } from './SwipelyMediaDelete.types';
+import { SwyftPixMediaDeleteModuleEvents } from './SwyftPixMediaDelete.types';
 
-declare class SwipelyMediaDeleteModule extends NativeModule<SwipelyMediaDeleteModuleEvents> {
+declare class SwyftPixMediaDeleteModule extends NativeModule<SwyftPixMediaDeleteModuleEvents> {
   PI: number;
   hello(): string;
   setValueAsync(value: string): Promise<void>;
 }
 
 // This call loads the native module object from the JSI.
-export default requireNativeModule<SwipelyMediaDeleteModule>('SwipelyMediaDelete');
+export default requireNativeModule<SwyftPixMediaDeleteModule>('SwyftPixMediaDelete');

@@ -1,4 +1,4 @@
-package expo.modules.swipelymedia
+package expo.modules.swyftpixmedia
 
 import android.app.Activity
 import android.content.ContentUris
@@ -11,9 +11,9 @@ import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-class SwipelyMediaDeleteModule : Module() {
+class SwyftPixMediaDeleteModule : Module() {
   companion object {
-    private const val TAG = "SwipelyMediaDelete"
+    private const val TAG = "SwyftPixMediaDelete"
     private const val DELETE_REQUEST_CODE = 47261
   }
 
@@ -23,7 +23,7 @@ class SwipelyMediaDeleteModule : Module() {
     get() = appContext.reactContext ?: error("React context is unavailable")
 
   override fun definition() = ModuleDefinition {
-    Name("SwipelyMediaDelete")
+    Name("SwyftPixMediaDelete")
 
     AsyncFunction("deleteMediaByPath") { path: String, promise: Promise ->
       if (pendingPromise != null) {

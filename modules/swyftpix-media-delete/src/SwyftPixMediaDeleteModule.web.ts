@@ -1,8 +1,8 @@
 import { registerWebModule, NativeModule } from 'expo';
 
-import { SwipelyMediaDeleteModuleEvents } from './SwipelyMediaDelete.types';
+import { SwyftPixMediaDeleteModuleEvents } from './SwyftPixMediaDelete.types';
 
-class SwipelyMediaDeleteModule extends NativeModule<SwipelyMediaDeleteModuleEvents> {
+class SwyftPixMediaDeleteModule extends NativeModule<SwyftPixMediaDeleteModuleEvents> {
   PI = Math.PI;
   async setValueAsync(value: string): Promise<void> {
     this.emit('onChange', { value });
@@ -12,4 +12,4 @@ class SwipelyMediaDeleteModule extends NativeModule<SwipelyMediaDeleteModuleEven
   }
 }
 
-export default registerWebModule(SwipelyMediaDeleteModule, 'SwipelyMediaDeleteModule');
+export default registerWebModule(SwyftPixMediaDeleteModule, 'SwyftPixMediaDeleteModule');

@@ -7,16 +7,16 @@ type NativeMediaDeleteModule = {
 
 /**
  * Load the native module lazily. This is important because Expo Go does not
- * contain Swipely's custom native module. Eagerly calling requireNativeModule
+ * contain SwyftPix's custom native module. Eagerly calling requireNativeModule
  * at import time prevents expo-router from loading any routes at all.
  */
 function getNativeMediaDelete(): NativeMediaDeleteModule | null {
   if (Platform.OS !== 'android') return null;
 
   try {
-    return requireNativeModule<NativeMediaDeleteModule>('SwipelyMediaDelete');
+    return requireNativeModule<NativeMediaDeleteModule>('SwyftPixMediaDelete');
   } catch (error) {
-    console.warn('[SwipelyMediaDelete] Native module is unavailable; using MediaLibrary fallback.', error);
+    console.warn('[SwyftPixMediaDelete] Native module is unavailable; using MediaLibrary fallback.', error);
     return null;
   }
 }
